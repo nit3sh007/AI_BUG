@@ -88,7 +88,7 @@ const LABEL={queued:'Queued',investigating:'Investigating',fixing:'Fixing',ready
 let selected=null,manual=false,lastTop=0,tab='patch';
 const ago=t=>{const s=Math.max(0,Date.now()/1000-t);return s<60?Math.round(s)+'s ago':s<3600?Math.round(s/60)+'m ago':Math.round(s/3600)+'h ago'};
 const dur=s=>s<60?Math.round(s)+'s':Math.floor(s/60)+'m '+Math.round(s%60)+'s';
-async function api(u,m='GET',body){const r=await fetch(u,{method:m,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw new Error(j.error||r.status);return j}
+async function api(u,m='GET',body){const r=await fetch(u,{method:m,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});let j={};try{j=await r.json()}catch(e){}if(!r.ok){const e=new Error(j.error||r.status);e.status=r.status;throw e}return j}
 
 async function poll(){
   try{
@@ -211,7 +211,22 @@ async function removeIncident(id){if(!confirm('Remove incident #'+id+' from the 
   try{await api('/api/incidents/'+id,'DELETE')}catch(e){alert(e.message);return}
   if(selected===id){selected=null;manual=false}window.__sig=null;poll()}
 let busyAct=false;
-async function act(id,a){if(busyAct)return;busyAct=true;try{await api(`/api/incidents/${id}/${a}`,'POST')}catch(e){alert(e.message)}finally{busyAct=false}window.__sig=null;poll()}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function act(id,a){
+  if(busyAct)return;busyAct=true;
+  const b=window.event&&window.event.currentTarget, old=b?b.textContent:'';
+  if(b){b.disabled=true;b.textContent=a==='approve'?'Applying...':'Working...'}
+  try{
+    for(let n=0;;n++){
+      try{await api(`/api/incidents/${id}/${a}`,'POST');break}
+      catch(e){
+        const transient=e.status===502||e.status===503||e.status===504||e instanceof TypeError;   // a sleeping or restarting host
+        if(transient&&n<8){if(b)b.textContent='Server is waking up, retrying...';await sleep(5000);continue}
+        if(n>0&&/not waiting|already|nothing to stop|cannot re-run/i.test(e.message))break;       // an earlier try went through
+        alert(e.message);break}
+    }
+  }finally{busyAct=false;if(b){b.disabled=false;b.textContent=old}}
+  window.__sig=null;poll()}
 async function rejectWith(id,rerunOnly){
   const g=prompt(rerunOnly?'Optional: tell the agent anything it should know before re-running.':'What is wrong with this fix? Tell the agent what the correct behaviour should be (leave empty to just reject):');
   if(g===null)return;
