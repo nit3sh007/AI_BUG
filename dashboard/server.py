@@ -525,8 +525,15 @@ def worker():
         try:
             if run_incident(iid) == "paused":
                 _jobs.put(iid)
-        except Exception as e:
-            print("worker error:", e)
+        except BaseException as e:   # includes Cancelled: the worker thread must never die
+            print("worker error:", repr(e))
+            try:
+                clear_cancel(iid)
+                set_status(iid, "failed", finished=time.time(), result=json.dumps(
+                    {"reason": f"Internal error in the dashboard: {type(e).__name__}: {e}"}))
+                add_event(iid, "warn", f"Internal error in the dashboard: {type(e).__name__}: {str(e)[:300]}")
+            except BaseException as e2:
+                print("worker error while reporting:", repr(e2))
 
 
 # ---------------------------------------------------------------- API
@@ -577,7 +584,7 @@ def incident(iid):
              waiting_for=next((o["id"] for o in older if o["status"] in ("investigating", "fixing")), None),
              error=json.loads(r["error"] or "{}"), issue=r["issue"], root_cause=r["root_cause"],
              result=json.loads(r["result"]) if r["result"] else None,
-             started=r["started"], finished=r["finished"], stopping=iid in _cancel or bool(cancel_flag(iid)),
+             started=r["started"], finished=r["finished"], stopping=r["status"] in ("investigating", "fixing") and (iid in _cancel or bool(cancel_flag(iid))),
              events=[dict(e) for e in q("SELECT ts, kind, text FROM events WHERE incident_id=? ORDER BY id", (iid,))])
     return jsonify(d)
 
@@ -645,6 +652,7 @@ def rerun(iid):
         x("UPDATE incidents SET issue=issue||? WHERE id=?",
           (f"\n\nHUMAN GUIDANCE (a reviewer rejected the previous fix; follow this): {guidance}", iid))
         add_event(iid, "info", f"Human guidance added: {guidance}")
+    clear_cancel(iid)
     set_status(iid, "queued", attempt=0, started=None, finished=None, result=None, root_cause=None)
     add_event(iid, "info", "Re-run requested. Queued; it starts when the agent is free.")
     _jobs.put(iid)
@@ -657,6 +665,7 @@ def stop(iid):
     if not r:
         return jsonify(error="not found"), 404
     if r["status"] == "queued":
+        clear_cancel(iid)
         set_status(iid, "stopped", finished=time.time(), result=json.dumps(
             {"reason": "Stopped by a human before it started.", "seconds": 0, "tokens": 0, "attempts": 0}))
         add_event(iid, "warn", "Stopped by a human before it started.")
