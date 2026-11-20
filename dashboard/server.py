@@ -263,6 +263,7 @@ def _kv_set(k, v):
 def poll_remote_once() -> int:
     """Fetch new errors from the hosted app and ingest them. Returns the number of errors received."""
     cur = json.loads(_kv_get("remote_cursor") or "{}")
+    first_run = cur.get("url") != REMOTE_APP_URL   # no saved position: fresh database (e.g. after a redeploy)
     after = cur.get("seq", 0) if cur.get("url") == REMOTE_APP_URL else 0
     for _ in range(2):
         req = urllib.request.Request(f"{REMOTE_APP_URL}/_autofix/errors?after={after}",
@@ -274,6 +275,13 @@ def poll_remote_once() -> int:
             continue
         break
     errors = sorted(data.get("errors", []), key=lambda e: e.get("seq", 0))
+    if first_run and errors and os.environ.get("INGEST_BACKLOG") != "1":
+        # The hosted app keeps old errors in memory, but this dashboard's database starts empty after a redeploy.
+        # Re-importing them would bring back incidents you already removed, so only errors from now on are imported.
+        top = max(e.get("seq", 0) for e in errors)
+        _kv_set("remote_cursor", json.dumps({"url": REMOTE_APP_URL, "boot": data.get("boot"), "seq": top}))
+        print(f"[remote] fresh database: skipped {len(errors)} old error(s) already in the hosted app's outbox")
+        return 0
     for e in errors:
         ingest(e)
     top = max([e.get("seq", 0) for e in errors], default=after)
