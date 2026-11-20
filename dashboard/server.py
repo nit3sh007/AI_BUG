@@ -45,7 +45,7 @@ DEMO_URL = os.environ.get("DEMO_URL", REMOTE_APP_URL or "https://demo-app-eatu.o
 DB_PATH = Path(os.environ.get("DASHBOARD_DB", HERE / "incidents.db"))
 USE_DOCKER = os.environ.get("USE_DOCKER") == "1"
 
-ACTIVE = ("queued", "investigating", "fixing", "ready", "escalated", "failed")  # statuses that absorb repeats
+ACTIVE = ("queued", "investigating", "fixing", "ready", "escalated", "failed", "stopped")  # statuses that absorb repeats
 app = Flask(__name__)
 _lock = threading.RLock()
 _jobs: "queue.PriorityQueue[int]" = queue.PriorityQueue()   # lowest incident id first = oldest first
@@ -331,6 +331,20 @@ def git_publish(iid, message: str, paths: list, wait: bool = False):
 
 
 # ---------------------------------------------------------------- agent worker
+class Cancelled(BaseException):
+    """Raised inside a running agent when a human pressed Stop. BaseException so `except Exception` in the LLM loop
+    cannot swallow it."""
+
+
+_cancel: set = set()   # incident ids a human asked to stop
+_purge: set = set()    # incident ids to delete once their running agent has stopped
+
+
+def check_cancel(iid):
+    if iid in _cancel:
+        raise Cancelled()
+
+
 class LiveLog(list):
     """run_agent appends every tool call here; we turn each one into a timeline event."""
     def __init__(self, iid):
@@ -338,6 +352,7 @@ class LiveLog(list):
         self.iid = iid
 
     def append(self, entry):
+        check_cancel(self.iid)
         super().append(entry)
         a = entry.get("args") or {}
         detail = a.get("path") or a.get("pattern") or a.get("target") or ""
@@ -382,7 +397,7 @@ def resume_queue():
     _resume.set()
 
 
-def run_incident(iid: int):
+def _run_incident(iid: int):
     row = q("SELECT * FROM incidents WHERE id=?", (iid,), one=True)
     waited = time.time() - queued_since(iid)
     set_status(iid, "investigating", started=time.time())
@@ -390,7 +405,9 @@ def run_incident(iid: int):
         add_event(iid, "info", f"Agent started after waiting {int(waited // 60)}m {int(waited % 60)}s in the queue.")
     snap = snapshot(DEMO_DIR)  # what the code looked like when this agent started (used to detect conflicts)
     err = json.loads(row["error"] or "{}")
+    check_cancel(iid)
     status = replay(err)
+    check_cancel(iid)
     if status is not None and status < 500:
         add_event(iid, "info", f"Replayed the failing request: it now returns HTTP {status}, so it no longer fails.")
         set_status(iid, "resolved", finished=time.time(), result=json.dumps(
@@ -408,6 +425,7 @@ def run_incident(iid: int):
     issue_text = row["issue"] + note
 
     def on_log(msg: str):
+        check_cancel(iid)
         if msg.startswith("[investigate] root cause:"):
             rc = msg.split(":", 1)[1].strip()
             x("UPDATE incidents SET root_cause=? WHERE id=?", (rc, iid))
@@ -449,10 +467,34 @@ def run_incident(iid: int):
         add_event(iid, "warn", f"Agent run failed: {type(e).__name__}: {str(e)[:300]}")
 
 
+def run_incident(iid: int):
+    try:
+        return _run_incident(iid)
+    except Cancelled:
+        if iid in _purge:
+            remove_incident(iid)
+        else:
+            set_status(iid, "stopped", finished=time.time(), result=json.dumps(
+                {"reason": "Stopped by a human before the agent finished.", "seconds": 0, "tokens": 0, "attempts": 0}))
+            add_event(iid, "warn", "Stopped by a human.")
+        return None
+    finally:
+        _cancel.discard(iid)
+        _purge.discard(iid)
+
+
+def remove_incident(iid: int):
+    x("DELETE FROM events WHERE incident_id=?", (iid,))
+    x("DELETE FROM incidents WHERE id=?", (iid,))
+
+
 def worker():
     while True:
         iid = _jobs.get()
         _resume.wait()
+        row = q("SELECT status FROM incidents WHERE id=?", (iid,), one=True)
+        if not row or row["status"] != "queued":   # deleted, stopped or already handled while it waited in the queue
+            continue
         try:
             if run_incident(iid) == "paused":
                 _jobs.put(iid)
@@ -508,7 +550,7 @@ def incident(iid):
              waiting_for=next((o["id"] for o in older if o["status"] in ("investigating", "fixing")), None),
              error=json.loads(r["error"] or "{}"), issue=r["issue"], root_cause=r["root_cause"],
              result=json.loads(r["result"]) if r["result"] else None,
-             started=r["started"], finished=r["finished"],
+             started=r["started"], finished=r["finished"], stopping=iid in _cancel,
              events=[dict(e) for e in q("SELECT ts, kind, text FROM events WHERE incident_id=? ORDER BY id", (iid,))])
     return jsonify(d)
 
@@ -569,7 +611,7 @@ def reject(iid):
 @app.post("/api/incidents/<int:iid>/rerun")
 def rerun(iid):
     r = q("SELECT status FROM incidents WHERE id=?", (iid,), one=True)
-    if not r or r["status"] not in ("escalated", "failed", "rejected"):
+    if not r or r["status"] not in ("escalated", "failed", "rejected", "stopped"):
         return jsonify(error="cannot re-run now"), 400
     guidance = ((request.get_json(silent=True) or {}).get("guidance") or "").strip()[:1000]
     if guidance:
@@ -579,6 +621,36 @@ def rerun(iid):
     set_status(iid, "queued", attempt=0, started=None, finished=None, result=None, root_cause=None)
     add_event(iid, "info", "Re-run requested. Queued; it starts when the agent is free.")
     _jobs.put(iid)
+    return jsonify(ok=True)
+
+
+@app.post("/api/incidents/<int:iid>/stop")
+def stop(iid):
+    r = q("SELECT status FROM incidents WHERE id=?", (iid,), one=True)
+    if not r:
+        return jsonify(error="not found"), 404
+    if r["status"] == "queued":
+        set_status(iid, "stopped", finished=time.time(), result=json.dumps(
+            {"reason": "Stopped by a human before it started.", "seconds": 0, "tokens": 0, "attempts": 0}))
+        add_event(iid, "warn", "Stopped by a human before it started.")
+    elif r["status"] in ("investigating", "fixing"):
+        _cancel.add(iid)
+        add_event(iid, "warn", "Stop requested. The agent halts after its current step (a few seconds).")
+    else:
+        return jsonify(error="nothing to stop"), 400
+    return jsonify(ok=True)
+
+
+@app.delete("/api/incidents/<int:iid>")
+def delete_incident(iid):
+    r = q("SELECT status FROM incidents WHERE id=?", (iid,), one=True)
+    if not r:
+        return jsonify(ok=True)
+    if r["status"] in ("investigating", "fixing"):
+        _purge.add(iid)      # removed as soon as the running agent has stopped
+        _cancel.add(iid)
+    else:
+        remove_incident(iid)
     return jsonify(ok=True)
 
 
