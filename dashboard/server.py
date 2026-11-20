@@ -30,7 +30,10 @@ from bugagent import env as llm_env          # noqa: E402
 from bugagent.orchestrator import run_agent  # noqa: E402
 
 # The shop is its own repo, checked out next to this one (D:\2026\demo_app next to D:\2026\AI-BUG). Override with DEMO_REPO.
-DEMO_DIR = Path(os.environ.get("DEMO_REPO", ROOT.parent / "demo_app")).resolve()   # the live, monitored app
+_default_demo = ROOT.parent / "demo_app" if os.access(ROOT.parent, os.W_OK) else Path("/tmp/demo_app")
+DEMO_DIR = Path(os.environ.get("DEMO_REPO", _default_demo)).resolve()   # the live, monitored app
+DEMO_REPO_URL = os.environ.get("DEMO_REPO_URL", "https://github.com/nit3sh007/demo_app.git")   # cloned here when DEMO_DIR is missing
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")                     # only needed to push (AUTO_PUSH=1)
 BASELINE = os.environ.get("DEMO_BASELINE", "buggy-baseline")   # git tag in the SHOP repo that marks its buggy state
 # Hosted mode (e.g. the app runs on Render, this dashboard on your laptop): the dashboard PULLS errors from the app.
 REMOTE_APP_URL = os.environ.get("REMOTE_APP_URL", "").rstrip("/")     # e.g. https://acme-shop.onrender.com
@@ -611,6 +614,26 @@ def index():
     return send_from_directory(HERE, "index.html")
 
 
+def ensure_demo_repo():
+    """Hosted mode: the agent needs the shop's code on this machine. Clone it if it is not there yet."""
+    if (DEMO_DIR / ".git").is_dir() or not REMOTE_APP_URL:
+        return
+    url = DEMO_REPO_URL
+    if GITHUB_TOKEN and url.startswith("https://"):
+        url = url.replace("https://", f"https://x-access-token:{GITHUB_TOKEN}@", 1)
+    try:
+        DEMO_DIR.parent.mkdir(parents=True, exist_ok=True)
+        r = subprocess.run(["git", "clone", url, str(DEMO_DIR)], capture_output=True, text=True, timeout=180)
+        if r.returncode:
+            print("WARNING: clone of the shop repo failed:", (r.stdout + r.stderr).replace(GITHUB_TOKEN or "\0", "***")[-300:])
+            return
+        for k, v in (("user.name", "bug-agent"), ("user.email", "bug-agent@users.noreply.github.com")):
+            subprocess.run(["git", "-C", str(DEMO_DIR), "config", k, v], capture_output=True, timeout=20)
+        print(f"Cloned shop repo into {DEMO_DIR}")
+    except Exception as e:
+        print(f"WARNING: could not clone the shop repo: {type(e).__name__}: {e}")
+
+
 _started = False
 
 
@@ -622,6 +645,7 @@ def startup():
             return
         _started = True
     init_db()
+    ensure_demo_repo()
     # requeue anything that was interrupted by a restart
     for r in q("SELECT id FROM incidents WHERE status IN ('queued','investigating','fixing')"):
         set_status(r["id"], "queued")
