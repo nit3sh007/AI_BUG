@@ -515,12 +515,46 @@ def remove_incident(iid: int):
     x("DELETE FROM incidents WHERE id=?", (iid,))
 
 
+def claim(iid: int) -> bool:
+    """Atomically move queued -> investigating. False if it was deleted, stopped or already taken (by another worker)."""
+    now = time.time()
+    with _lock, db() as c:
+        return c.execute("UPDATE incidents SET status='investigating', updated=?, started=? "
+                         "WHERE id=? AND status='queued'", (now, now, iid)).rowcount == 1
+
+
+_worker_thread = None
+
+
+def start_worker():
+    global _worker_thread
+    _worker_thread = threading.Thread(target=worker, daemon=True, name="agent-worker")
+    _worker_thread.start()
+
+
+def watchdog():
+    """Self-healing: keep the worker thread alive, and re-queue any 'queued' incident that is missing from the
+    in-memory queue (e.g. the request that queued it was handled by another process)."""
+    while True:
+        time.sleep(3)
+        try:
+            if _worker_thread is None or not _worker_thread.is_alive():
+                print("[watchdog] worker thread was not running; restarting it")
+                start_worker()
+            with _jobs.mutex:
+                waiting = set(_jobs.queue)
+            for r in q("SELECT id FROM incidents WHERE status='queued' ORDER BY id"):
+                if r["id"] not in waiting:
+                    _jobs.put(r["id"])
+        except BaseException as e:
+            print("[watchdog] error:", repr(e))
+
+
 def worker():
     while True:
         iid = _jobs.get()
         _resume.wait()
-        row = q("SELECT status FROM incidents WHERE id=?", (iid,), one=True)
-        if not row or row["status"] != "queued":   # deleted, stopped or already handled while it waited in the queue
+        if not claim(iid):   # deleted, stopped or already handled while it waited in the queue
             continue
         try:
             if run_incident(iid) == "paused":
@@ -689,6 +723,17 @@ def delete_incident(iid):
     return jsonify(ok=True)
 
 
+@app.get("/api/debug")
+def debug():
+    with _jobs.mutex:
+        waiting = sorted(_jobs.queue)
+    return jsonify(pid=os.getpid(), worker_alive=bool(_worker_thread and _worker_thread.is_alive()),
+                   threads=[t.name for t in threading.enumerate()], queue=waiting, resumed=_resume.is_set(),
+                   paused=dict(_pause), cancel_memory=sorted(_cancel),
+                   statuses={r["id"]: r["status"] for r in q("SELECT id, status FROM incidents")},
+                   demo_dir=str(DEMO_DIR), demo_dir_exists=DEMO_DIR.is_dir())
+
+
 @app.post("/api/resume")
 def resume():
     resume_queue()
@@ -758,7 +803,8 @@ def startup():
     for r in q("SELECT id FROM incidents WHERE status IN ('queued','investigating','fixing')"):
         set_status(r["id"], "queued")
         _jobs.put(r["id"])
-    threading.Thread(target=worker, daemon=True).start()
+    start_worker()
+    threading.Thread(target=watchdog, daemon=True, name="watchdog").start()
     if REMOTE_APP_URL and AUTOFIX_TOKEN:
         threading.Thread(target=poll_loop, daemon=True).start()
         print(f"Pulling errors from {REMOTE_APP_URL} every {POLL_SECONDS:g}s")
