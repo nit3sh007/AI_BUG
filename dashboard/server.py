@@ -38,7 +38,7 @@ AUTOFIX_TOKEN = os.environ.get("AUTOFIX_TOKEN", "")                   # same sec
 POLL_SECONDS = float(os.environ.get("POLL_SECONDS", "10"))
 DEPLOY_GRACE = int(os.environ.get("DEPLOY_GRACE_SECONDS", "300" if REMOTE_APP_URL else "0"))
 AUTO_PUSH = os.environ.get("AUTO_PUSH") == "1"                        # git commit+push after approval
-DEMO_URL = os.environ.get("DEMO_URL", REMOTE_APP_URL or "http://127.0.0.1:5001")
+DEMO_URL = os.environ.get("DEMO_URL", REMOTE_APP_URL or "https://demo-app-eatu.onrender.com").rstrip("/")
 DB_PATH = Path(os.environ.get("DASHBOARD_DB", HERE / "incidents.db"))
 USE_DOCKER = os.environ.get("USE_DOCKER") == "1"
 
@@ -611,7 +611,16 @@ def index():
     return send_from_directory(HERE, "index.html")
 
 
-if __name__ == "__main__":
+_started = False
+
+
+def startup():
+    """Create tables and start background threads. Runs once, whether launched by gunicorn or `python server.py`."""
+    global _started
+    with _lock:
+        if _started:
+            return
+        _started = True
     init_db()
     # requeue anything that was interrupted by a restart
     for r in q("SELECT id FROM incidents WHERE status IN ('queued','investigating','fixing')"):
@@ -626,5 +635,10 @@ if __name__ == "__main__":
     if not (DEMO_DIR / "webapp.py").is_file():
         print(f"WARNING: no webapp.py in {DEMO_DIR}. Clone the shop repo there or set DEMO_REPO in .env.")
     print(f"LLM:         {llm_env.describe()}")
+
+
+startup()
+
+if __name__ == "__main__":
     print(f"Dashboard:   http://127.0.0.1:8000\nMonitored app: {DEMO_URL}  (code in {DEMO_DIR})")
     app.run(host="127.0.0.1", port=8000, threaded=True)
