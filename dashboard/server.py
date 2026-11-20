@@ -340,8 +340,27 @@ _cancel: set = set()   # incident ids a human asked to stop
 _purge: set = set()    # incident ids to delete once their running agent has stopped
 
 
+def request_cancel(iid, purge=False):
+    """Remember the request in memory and in the database, so it is seen even if the request and the agent run in
+    different worker processes."""
+    _cancel.add(iid)
+    if purge:
+        _purge.add(iid)
+    _kv_set(f"cancel:{iid}", "purge" if purge else "stop")
+
+
+def cancel_flag(iid):
+    return _kv_get(f"cancel:{iid}")
+
+
+def clear_cancel(iid):
+    _cancel.discard(iid)
+    _purge.discard(iid)
+    x("DELETE FROM kv WHERE key=?", (f"cancel:{iid}",))
+
+
 def check_cancel(iid):
-    if iid in _cancel:
+    if iid in _cancel or cancel_flag(iid):
         raise Cancelled()
 
 
@@ -468,10 +487,11 @@ def _run_incident(iid: int):
 
 
 def run_incident(iid: int):
+    clear_cancel(iid)   # a stale request from an earlier run must not stop this one
     try:
         return _run_incident(iid)
     except Cancelled:
-        if iid in _purge:
+        if iid in _purge or cancel_flag(iid) == "purge":
             remove_incident(iid)
         else:
             set_status(iid, "stopped", finished=time.time(), result=json.dumps(
@@ -479,8 +499,7 @@ def run_incident(iid: int):
             add_event(iid, "warn", "Stopped by a human.")
         return None
     finally:
-        _cancel.discard(iid)
-        _purge.discard(iid)
+        clear_cancel(iid)
 
 
 def remove_incident(iid: int):
@@ -550,7 +569,7 @@ def incident(iid):
              waiting_for=next((o["id"] for o in older if o["status"] in ("investigating", "fixing")), None),
              error=json.loads(r["error"] or "{}"), issue=r["issue"], root_cause=r["root_cause"],
              result=json.loads(r["result"]) if r["result"] else None,
-             started=r["started"], finished=r["finished"], stopping=iid in _cancel,
+             started=r["started"], finished=r["finished"], stopping=iid in _cancel or bool(cancel_flag(iid)),
              events=[dict(e) for e in q("SELECT ts, kind, text FROM events WHERE incident_id=? ORDER BY id", (iid,))])
     return jsonify(d)
 
@@ -634,7 +653,7 @@ def stop(iid):
             {"reason": "Stopped by a human before it started.", "seconds": 0, "tokens": 0, "attempts": 0}))
         add_event(iid, "warn", "Stopped by a human before it started.")
     elif r["status"] in ("investigating", "fixing"):
-        _cancel.add(iid)
+        request_cancel(iid)
         add_event(iid, "warn", "Stop requested. The agent halts after its current step (a few seconds).")
     else:
         return jsonify(error="nothing to stop"), 400
@@ -647,8 +666,7 @@ def delete_incident(iid):
     if not r:
         return jsonify(ok=True)
     if r["status"] in ("investigating", "fixing"):
-        _purge.add(iid)      # removed as soon as the running agent has stopped
-        _cancel.add(iid)
+        request_cancel(iid, purge=True)      # removed as soon as the running agent has stopped
     else:
         remove_incident(iid)
     return jsonify(ok=True)
@@ -717,6 +735,7 @@ def startup():
             return
         _started = True
     init_db()
+    x("DELETE FROM kv WHERE key LIKE 'cancel:%'")
     ensure_demo_repo()
     # requeue anything that was interrupted by a restart
     for r in q("SELECT id FROM incidents WHERE status IN ('queued','investigating','fixing')"):
