@@ -73,7 +73,7 @@ header{display:flex;flex-wrap:wrap;align-items:center;gap:14px 26px;padding:12px
     <div class="st"><div class="v" id="m2" style="color:var(--green)">0</div><div class="l" id="m2l">Auto-fixed</div></div>
     <div class="st"><div class="v" id="m3" style="color:var(--red)">0</div><div class="l">Escalated</div></div>
   </div>
-  <a class="btn" id="demolink" target="_blank" href="https://demo-app-eatu.onrender.com/">Open demo app</a>
+  <a class="btn" id="demolink" target="_blank" href="#">Open demo app</a>
   <button class="btn" onclick="resetDemo()">Reset demo</button>
 </header>
 <div id="banner"></div>
@@ -210,7 +210,8 @@ async function stopIncident(id){try{await api(`/api/incidents/${id}/stop`,'POST'
 async function removeIncident(id){if(!confirm('Remove incident #'+id+' from the list?'))return;
   try{await api('/api/incidents/'+id,'DELETE')}catch(e){alert(e.message);return}
   if(selected===id){selected=null;manual=false}window.__sig=null;poll()}
-async function act(id,a){try{await api(`/api/incidents/${id}/${a}`,'POST')}catch(e){alert(e.message)}poll()}
+let busyAct=false;
+async function act(id,a){if(busyAct)return;busyAct=true;try{await api(`/api/incidents/${id}/${a}`,'POST')}catch(e){alert(e.message)}finally{busyAct=false}window.__sig=null;poll()}
 async function rejectWith(id,rerunOnly){
   const g=prompt(rerunOnly?'Optional: tell the agent anything it should know before re-running.':'What is wrong with this fix? Tell the agent what the correct behaviour should be (leave empty to just reject):');
   if(g===null)return;

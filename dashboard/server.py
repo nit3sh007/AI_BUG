@@ -313,16 +313,29 @@ def _note(iid, kind, text):
     add_event(iid, kind, text) if iid else print(f"[git] {text}")
 
 
+_git_lock = threading.Lock()
+
+
 def git_publish(iid, message: str, paths: list, wait: bool = False):
     """git add + commit + push for these paths, in a background thread. Needs AUTO_PUSH=1, a git repo with a
     configured remote and saved credentials."""
     def run():
+        with _git_lock:   # one git operation at a time: two at once collide on .git/index.lock
+            _run()
+
+    def _run():
         try:
             top = subprocess.run(["git", "-C", str(DEMO_DIR), "rev-parse", "--show-toplevel"],
                                  capture_output=True, text=True, timeout=20)
             if top.returncode:
                 return _note(iid, "warn", "Auto-push skipped: the app folder is not inside a git repository.")
             root, rels = top.stdout.strip(), [str(p) for p in paths]
+            lock = Path(root) / ".git" / "index.lock"
+            try:
+                if lock.exists() and time.time() - lock.stat().st_mtime > 20:   # left behind by a crashed git
+                    lock.unlink()
+            except OSError:
+                pass
             for step in (["add", "-A", "--", *rels], ["commit", "-m", message, "--", *rels], ["push"]):
                 r = subprocess.run(["git", "-C", root, *step], capture_output=True, text=True, timeout=120)
                 out = (r.stdout + r.stderr).strip()
@@ -623,8 +636,22 @@ def incident(iid):
     return jsonify(d)
 
 
+_approving: set = set()
+
+
 @app.post("/api/incidents/<int:iid>/approve")
 def approve(iid):
+    with _lock:
+        if iid in _approving:   # double click / repeated request: apply the patch only once
+            return jsonify(error="this fix is already being applied"), 409
+        _approving.add(iid)
+    try:
+        return _approve_locked(iid)
+    finally:
+        _approving.discard(iid)
+
+
+def _approve_locked(iid):
     r = q("SELECT * FROM incidents WHERE id=?", (iid,), one=True)
     if not r or r["status"] != "ready":
         return jsonify(error="incident is not waiting for approval"), 400
@@ -768,11 +795,15 @@ def index():
 
 def ensure_demo_repo():
     """Hosted mode: the agent needs the shop's code on this machine. Clone it if it is not there yet."""
-    if (DEMO_DIR / ".git").is_dir() or not REMOTE_APP_URL:
+    if not REMOTE_APP_URL:
         return
     url = DEMO_REPO_URL
     if GITHUB_TOKEN and url.startswith("https://"):
         url = url.replace("https://", f"https://x-access-token:{GITHUB_TOKEN}@", 1)
+    if (DEMO_DIR / ".git").is_dir():
+        if GITHUB_TOKEN:   # an existing clone made before the token was set: let it push
+            subprocess.run(["git", "-C", str(DEMO_DIR), "remote", "set-url", "origin", url], capture_output=True, timeout=20)
+        return
     try:
         DEMO_DIR.parent.mkdir(parents=True, exist_ok=True)
         r = subprocess.run(["git", "clone", url, str(DEMO_DIR)], capture_output=True, text=True, timeout=180)
