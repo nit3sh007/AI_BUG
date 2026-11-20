@@ -1,0 +1,1 @@
+{"repo": "../../../sample_app", "expected_files": ["app/auth.py", "app/users.py"]}

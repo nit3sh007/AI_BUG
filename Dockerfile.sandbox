@@ -1,0 +1,6 @@
+# Sandbox image the agent runs tests in. Build once:
+#   docker build -t bugagent-sandbox -f Dockerfile.sandbox .
+# For real repos, add that repo's dependencies here (containers run with --network none).
+FROM python:3.12-slim
+RUN pip install --no-cache-dir pytest ruff
+WORKDIR /work

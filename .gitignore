@@ -1,0 +1,8 @@
+.env
+__pycache__/
+.pytest_cache/
+out/
+bench_out/
+smoke_out/
+.venv/
+dashboard/incidents.db

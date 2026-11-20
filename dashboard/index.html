@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Autofix Dashboard</title>
+<style>
+:root{--bg:#0f1217;--rail:#12161c;--panel:#161b22;--panel2:#1b222c;--line:#252c36;--txt:#e8ebf0;--mut:#9aa4b2;
+--blue:#5b9bff;--green:#4cc38a;--amber:#f0b44c;--red:#f0686b;--violet:#a98bff;--mono:'JetBrains Mono',ui-monospace,Consolas,Menlo,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 Inter,system-ui,Segoe UI,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+button{font-family:inherit}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:14px 26px;padding:12px 28px;border-bottom:1px solid var(--line);background:var(--panel)}
+.logo{font-weight:700;font-size:18px;letter-spacing:.2px}
+.chip{font-size:12px;color:var(--mut);border:1px solid var(--line);border-radius:99px;padding:3px 10px}
+.live{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green)}.dot.off{background:var(--red)}
+.stats{display:flex;flex-wrap:wrap;gap:6px 30px;flex:1;justify-content:center}
+.st .v{font-size:21px;font-weight:650;line-height:1.15}.st .l{font-size:12px;color:var(--mut)}
+.sp{flex:1}
+.btn{font:inherit;font-size:13px;color:var(--txt);background:var(--panel2);border:1px solid #2c3541;border-radius:8px;padding:8px 14px;cursor:pointer;text-decoration:none}
+.btn:hover{border-color:var(--blue)}
+.pri{background:var(--green);border-color:var(--green);color:#06150d;font-weight:600;padding:10px 18px;font-size:14px}
+.dan{background:transparent;border-color:var(--red);color:var(--red);padding:10px 16px;font-size:14px}
+.banner{display:flex;flex-wrap:wrap;align-items:center;gap:12px 18px;padding:12px 28px;background:#2a2112;border-bottom:1px solid #5a4516;color:#f6d58b;font-size:13px}
+.banner b{color:#ffe3a3}.banner .btn{margin-left:auto}
+.body{display:flex;flex-wrap:wrap;flex:1;align-items:stretch}
+.rail{flex:0 0 300px;border-right:1px solid var(--line);background:var(--rail)}
+.rail h3{margin:0;padding:16px 20px 10px;font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--mut);font-weight:500}
+.item{padding:12px 20px;border-bottom:1px solid var(--line);cursor:pointer}.item:hover{background:var(--panel2)}
+.item.sel{background:#1b222c;box-shadow:inset 3px 0 var(--blue)}
+.item .t{display:flex;justify-content:space-between;gap:8px;font-weight:600}
+.item .s{font-size:11px;font-weight:600;white-space:nowrap}
+.item .d{font-size:12px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mono{font-family:var(--mono)}
+.c-queued,.c-investigating,.c-fixing{color:#7fb0ff}.c-ready{color:var(--amber)}.c-approved,.c-resolved{color:var(--green)}
+.c-escalated,.c-failed{color:var(--red)}.c-rejected{color:var(--mut)}
+.main{flex:999 1 640px;min-width:0;padding:24px 28px;display:flex;flex-direction:column;gap:18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+.lab{font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--mut);margin-bottom:12px}
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:14px;justify-content:space-between}
+.top h1{margin:2px 0 0;font-size:24px;font-weight:650}.top .sub{font-size:12px;color:var(--mut)}
+.acts{display:flex;gap:10px;flex-wrap:wrap}
+.steps{display:flex;flex-wrap:wrap;padding:20px 24px}
+.step{flex:1 1 120px;text-align:center;position:relative;padding-top:24px;font-size:13px;color:var(--mut)}
+.step:before{content:"";position:absolute;top:7px;left:0;right:0;height:3px;background:var(--line)}
+.step:after{content:"";position:absolute;top:0;left:50%;margin-left:-9px;width:18px;height:18px;border-radius:50%;background:var(--line);border:3px solid var(--panel)}
+.step.done{color:var(--txt)}.step.done:before,.step.done:after{background:var(--green)}
+.step.cur{color:#7fb0ff;font-weight:600}.step.cur:after{background:var(--blue);animation:p2 1.4s infinite}
+.step.wait{color:var(--amber);font-weight:600}.step.wait:after{background:var(--amber)}
+.step.bad{color:var(--red);font-weight:600}.step.bad:after{background:var(--red)}
+@keyframes p2{50%{transform:scale(1.3)}}
+.cols{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start}
+.cols>div{flex:1 1 400px;min-width:0;display:flex;flex-direction:column;gap:18px}
+.kv{display:grid;grid-template-columns:90px 1fr;gap:8px 12px;font-size:13px}.kv>div:nth-child(odd){color:var(--mut)}
+.kv code{font-family:var(--mono);font-size:12px;word-break:break-word}
+.tl{max-height:420px;overflow:auto;font-size:13px}
+.ev{display:flex;gap:12px;padding:7px 0;border-bottom:1px dashed var(--line)}.ev:last-child{border:0}
+.ev .ts{width:44px;flex:none;color:var(--mut);font-family:var(--mono);font-size:11px;padding-top:2px}
+.ev.detect{color:#f0868a}.ev.warn{color:var(--amber)}.ev.done{color:var(--green)}.ev.finding{color:var(--violet)}
+.ev.tool .tx{color:var(--mut);font-family:var(--mono);font-size:12px}
+.tabs{padding:0}.tabbar{display:flex;gap:4px;padding:0 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tab{padding:12px 14px;font-size:13px;color:var(--mut);cursor:pointer;background:none;border:0;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab.on{color:var(--txt);font-weight:600;border-bottom-color:var(--blue)}
+.pane{padding:16px 20px;font-family:var(--mono);font-size:12px;line-height:1.6;overflow:auto;max-height:420px;white-space:pre}
+.diff span{display:block;padding:0 4px}.diff .a{background:rgba(76,195,138,.14);color:#8fe0b3}.diff .r{background:rgba(240,104,107,.14);color:#f4a3a6}.diff .h{color:var(--violet)}
+.note{padding:0 20px 14px;color:var(--mut);font-size:12px}
+.empty{padding:40px 24px;color:var(--mut);text-align:center;max-width:520px;margin:40px auto}.empty b{color:var(--txt)}
+@media(max-width:900px){.rail{flex:1 1 100%;border-right:0;border-bottom:1px solid var(--line)}.stats{justify-content:flex-start}}
+</style></head><body>
+<header>
+  <div class="logo">Autofix</div><div class="chip" id="model">model</div>
+  <div class="live"><span class="dot" id="dot"></span><span id="livetxt">live</span></div>
+  <div class="stats">
+    <div class="st"><div class="v" id="m1">0</div><div class="l">Errors detected</div></div>
+    <div class="st"><div class="v" id="m2" style="color:var(--green)">0</div><div class="l" id="m2l">Auto-fixed</div></div>
+    <div class="st"><div class="v" id="m3" style="color:var(--red)">0</div><div class="l">Escalated</div></div>
+  </div>
+  <a class="btn" id="demolink" target="_blank" href="#">Open demo app</a>
+  <button class="btn" onclick="resetDemo()">Reset demo</button>
+</header>
+<div id="banner"></div>
+<div class="body">
+  <aside class="rail"><h3 id="listhead">Incidents</h3><div id="list"></div></aside>
+  <main class="main" id="detail"></main>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const LABEL={queued:'Queued',investigating:'Investigating',fixing:'Fixing',ready:'Needs approval',approved:'Fixed',resolved:'Already fixed',escalated:'Escalated',failed:'Agent error',rejected:'Rejected'};
+let selected=null,manual=false,lastTop=0,tab='patch';
+const ago=t=>{const s=Math.max(0,Date.now()/1000-t);return s<60?Math.round(s)+'s ago':s<3600?Math.round(s/60)+'m ago':Math.round(s/3600)+'h ago'};
+const dur=s=>s<60?Math.round(s)+'s':Math.floor(s/60)+'m '+Math.round(s%60)+'s';
+async function api(u,m='GET',body){const r=await fetch(u,{method:m,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw new Error(j.error||r.status);return j}
+
+async function poll(){
+  try{
+    const s=await api('/api/state');
+    $('dot').className='dot';$('livetxt').textContent='live';
+    $('model').textContent=s.model;$('demolink').href=s.demo_url;
+    const m=s.metrics;
+    $('m1').textContent=m.detected;$('m2').textContent=m.auto_fixed;
+    $('m2l').textContent=m.fix_rate==null?'Auto-fixed':'Auto-fixed ('+m.fix_rate+'%)';
+    $('m3').textContent=m.escalated;
+    const P=s.paused;
+    $('banner').innerHTML=P?`<div class="banner"><span><b>Paused.</b> ${esc(P.reason)} Auto-retry around ${new Date(P.until*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}.</span><button class="btn" onclick="resume()">Resume now</button></div>`:'';
+    window.__paused=!!P;
+    $('listhead').textContent='Incidents · '+s.incidents.length;
+    const top=s.incidents[0]?s.incidents[0].id:0;
+    if(top>lastTop){if(!manual||selected==null)selected=top;lastTop=top}
+    if(!s.incidents.length)selected=null;
+    $('list').innerHTML=s.incidents.map(i=>`
+      <div class="item ${i.id===selected?'sel':''}" onclick="pick(${i.id})">
+        <div class="t"><span>#${i.id} ${esc(i.title.split(' on ')[0])}</span><span class="s c-${i.status}">${i.status==='fixing'&&i.attempt?'Fixing '+i.attempt+'/3':i.status==='queued'?(P?'Paused':(i.ahead?'Queued · '+i.ahead+' ahead':'Queued')):LABEL[i.status]}</span></div>
+        <div class="d mono">${esc(i.title.split(' on ')[1]||i.path)}</div>
+        <div class="d">${ago(i.created)}${i.occurrences>1?' · seen '+i.occurrences+'x':''}</div></div>`).join('');
+    if(selected!=null)await showDetail(selected);
+    else $('detail').innerHTML=`<div class="empty"><b>No errors yet.</b><br><br>Open the demo app and click a button that has a bug, for example <i>Apply coupon</i>. The error will appear here and the agent will start automatically.</div>`;
+  }catch(e){$('dot').className='dot off';$('livetxt').textContent='offline'}
+}
+function pick(id){selected=id;manual=true;poll()}
+function setTab(t){tab=t;poll()}
+
+function stepper(d){
+  if(d.status==='resolved')return '<div class="card steps">'+['Error detected','Request replayed','No longer fails (no LLM used)'].map(n=>`<div class="step done">${n}</div>`).join('')+'</div>';
+  const names=['Error detected','Investigated','Fixed','Tests verified','Approved'];
+  const st=d.status;let cur=0,bad=-1,wait=-1;
+  if(st==='queued')cur=0;else if(st==='investigating')cur=1;else if(st==='fixing')cur=2;
+  else if(st==='ready'){cur=3;wait=3}else if(st==='approved')cur=5;
+  else if(st==='escalated'||st==='failed'){cur=2;bad=2}else if(st==='rejected'){cur=3;bad=3}
+  return '<div class="card steps">'+names.map((n,i)=>{
+    let c='';if(i===bad)c='bad';else if(i===wait)c='wait';else if(i<cur)c='done';else if(i===cur&&st!=='approved')c='cur';
+    let label=n;
+    if(i===1&&cur===1)label='Investigating';
+    if(i===2){label=cur===2&&bad!==2?'Fixing'+(d.attempt?` (try ${d.attempt}/3)`:''):(i<cur?`Fixed${d.attempt?` (try ${d.attempt}/3)`:''}`:'Fix')}
+    if(i===3&&wait===3)label='Awaiting approval';
+    if(i===bad&&bad===2)label='Escalated';if(i===bad&&bad===3)label='Rejected';
+    return `<div class="step ${c}">${esc(label)}</div>`}).join('')+'</div>';
+}
+function diffHtml(p){return (p||'').split('\n').map(l=>{
+  const c=/^(\+\+\+|---|diff|index|@@|new file|deleted file)/.test(l)?'h':l.startsWith('+')?'a':l.startsWith('-')?'r':'';
+  return `<span class="${c}">${esc(l)||' '}</span>`}).join('')}
+
+function waitMsg(d){
+  if(d.status==='queued'){
+    if(window.__paused)return 'Paused: the LLM daily limit was reached. This incident will start again automatically.';
+    return d.waiting_for?`Waiting in the queue. #${d.waiting_for} is being handled first${d.ahead>1?` (${d.ahead} ahead of this one)`:''}.`:'Waiting for the agent to start.';
+  }
+  if(d.status==='investigating'||d.status==='fixing')return 'The agent is investigating.';
+  if(d.status==='resolved')return 'Closed without using the LLM: replaying the failing request now succeeds, so an earlier fix most likely resolved it.';
+  if(d.status==='failed')return 'The agent stopped before finding a root cause (see why below).';
+  return 'No root cause was found.';
+}
+async function copyLog(){
+  const d=window.__d;if(!d)return;const t0=d.events.length?d.events[0].ts:0;
+  const text=`Incident #${d.id} ${d.title} [${LABEL[d.status]||d.status}]\n`+d.events.map(ev=>`+${dur(ev.ts-t0)}  ${ev.text}`).join('\n');
+  let ok=false;
+  try{await navigator.clipboard.writeText(text);ok=true}catch(e){
+    const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();
+    try{ok=document.execCommand('copy')}catch(_){}ta.remove()}
+  const b=$('copybtn');if(b){b.textContent=ok?'Copied':'Copy failed';setTimeout(()=>{const x=$('copybtn');if(x)x.textContent='Copy log'},1500)}
+}
+async function resume(){try{await api('/api/resume','POST')}catch(e){alert(e.message)}poll()}
+async function showDetail(id){
+  const d=await api('/api/incidents/'+id);
+  window.__d=d;
+  // only rebuild the panel when something changed; rebuilding every poll reset scrolling and cleared text selection
+  const sig=JSON.stringify([id,tab,d.status,d.updated,d.events.length,d.attempt,d.occurrences,d.ahead,!!window.__paused,Math.floor(Date.now()/60000)]);
+  if(sig===window.__sig&&$('detail').firstChild)return;
+  window.__sig=sig;
+  const e=d.error||{},r=d.result||{},f=r.findings||{};
+  const t0=d.events.length?d.events[0].ts:0;
+  const acts=[];
+  if(d.status==='ready')acts.push(`<button class="btn pri" onclick="act(${id},'approve')">Approve and apply patch</button><button class="btn dan" onclick="rejectWith(${id})">Reject with guidance</button>`);
+  if(['escalated','failed','rejected'].includes(d.status))acts.push(`<button class="btn" onclick="rejectWith(${id},true)">Re-run agent</button>`);
+  const tabs=[['patch','Patch'],['test','Test output'],['trace','Stack trace'],['issue','Original report']];
+  let pane='';
+  if(tab==='patch')pane=r.patch?`<div class="pane diff" data-tab="patch">${diffHtml(r.patch)}</div>`:`<div class="pane">No patch yet. The agent is still working.</div>`;
+  else if(tab==='test')pane=`<div class="pane" data-tab="test">${esc(r.final_test_output||'No test output yet.')}</div>`;
+  else if(tab==='trace')pane=`<div class="pane" data-tab="trace">${esc(e.traceback||'')}</div>`;
+  else pane=`<div class="pane" data-tab="issue" style="white-space:pre-wrap">${esc(d.issue)}</div>`;
+  const prevPane=document.querySelector('.pane'),paneScroll=prevPane&&prevPane.dataset.tab===tab?[prevPane.scrollTop,prevPane.scrollLeft]:null;
+  const prevTl=$('tl'),atBottom=!prevTl||prevTl.scrollHeight-prevTl.scrollTop-prevTl.clientHeight<40,prevTop=prevTl?prevTl.scrollTop:0;
+  $('detail').innerHTML=`
+  <div class="top"><div><div class="sub">Incident #${d.id} · detected ${ago(d.created)}</div><h1>${esc(d.title)}</h1></div><div class="acts">${acts.join('')}</div></div>
+  ${stepper(d)}
+  <div class="cols">
+    <div>
+      <div class="card"><div class="lab">What happened</div><div class="kv">
+        <div>Request</div><div><code>${esc(e.method)} ${esc(e.path)} ${esc(JSON.stringify(e.request_body||{}))}</code></div>
+        <div>Error</div><div><code style="color:#f0868a">${esc(e.error_type)}: ${esc(e.message)}</code></div>
+        <div>Seen</div><div>${d.occurrences} time${d.occurrences>1?'s':''}</div>
+        ${r.seconds?`<div>Agent run</div><div>${dur(r.seconds)} · ${(r.tokens||0).toLocaleString()} tokens · ${r.tool_calls} tool calls</div>`:''}
+      </div></div>
+      <div class="card"><div class="lab">Root cause and fix</div>
+        ${d.root_cause?`<div style="margin-bottom:10px">${esc(d.root_cause)}</div>`:`<div style="color:var(--mut)">${waitMsg(d)}</div>`}
+        ${r.fix_summary?`<div style="font-size:13px;color:var(--mut)">Fix: ${esc(r.fix_summary)}</div>`:''}
+        ${r.reason&&!['ready','approved','resolved'].includes(d.status)?`<div style="font-size:13px;color:var(--amber)">Why it stopped: ${esc(r.reason)}</div>`:''}
+      </div>
+    </div>
+    <div class="card"><div class="lab" style="display:flex;justify-content:space-between;align-items:center">Agent activity<button class="btn" id="copybtn" style="padding:5px 12px;font-size:12px;text-transform:none;letter-spacing:0" onclick="copyLog()">Copy log</button></div><div class="tl" id="tl">${d.events.map(ev=>`
+      <div class="ev ${ev.kind}"><span class="ts">+${dur(ev.ts-t0)}</span><span class="tx">${esc(ev.text)}</span></div>`).join('')}</div></div>
+  </div>
+  <div class="card tabs"><div class="tabbar">${tabs.map(([k,n])=>`<button class="tab ${tab===k?'on':''}" onclick="setTab('${k}')">${n}${k==='patch'&&(r.changed_files||[]).length?' · '+r.changed_files.length+' file'+(r.changed_files.length>1?'s':''):''}</button>`).join('')}</div>
+    ${pane}${d.status==='ready'&&tab==='patch'?'<div class="note">Nothing is changed in the app until a human approves.</div>':''}</div>`;
+  const np=document.querySelector('.pane');if(np&&paneScroll){np.scrollTop=paneScroll[0];np.scrollLeft=paneScroll[1]}
+  const tl=$('tl');if(tl){tl.scrollTop=(atBottom&&['queued','investigating','fixing'].includes(d.status))?tl.scrollHeight:prevTop}
+}
+async function act(id,a){try{await api(`/api/incidents/${id}/${a}`,'POST')}catch(e){alert(e.message)}poll()}
+async function rejectWith(id,rerunOnly){
+  const g=prompt(rerunOnly?'Optional: tell the agent anything it should know before re-running.':'What is wrong with this fix? Tell the agent what the correct behaviour should be (leave empty to just reject):');
+  if(g===null)return;
+  try{if(!rerunOnly)await api(`/api/incidents/${id}/reject`,'POST');
+    if(g.trim()||rerunOnly)await api(`/api/incidents/${id}/rerun`,'POST',{guidance:g})}
+  catch(e){alert(e.message)}poll()}
+async function resetDemo(){if(!confirm('Restore the shop to its buggy baseline and clear all incidents?'))return;
+  try{await api('/api/demo/reset','POST')}catch(e){alert(e.message);return}selected=null;manual=false;lastTop=0;poll()}
+poll();setInterval(poll,1500);
+</script></body></html>
